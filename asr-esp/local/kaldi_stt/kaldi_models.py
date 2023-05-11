@@ -60,6 +60,7 @@ class SpeechModel(object):
         self.sil_seconds = 0.145
         self.long_sil_seconds = 0.495
         self.disflunecy_words = ["AH", "UM", "UH", "EM", "OH"]
+        self.vowel_dict = set(["AA", "AE", "AH", "AO", "EH", "ER", "IH", "IY", "UH", "UW"])
         self.special_words = ["<UNK>"]
         self.g2p = G2p()
     
@@ -302,6 +303,10 @@ class SpeechModel(object):
         phone_count_dict = defaultdict(int)
         phone_duration_list = []
         phone_conf_list = []
+        
+        #Initialize vowel duration and count dictionaries
+        vowel_duration_dict = defaultdict(list)
+        vowel_count_dict = defaultdict(int)
          
         response_duration = total_duration
         if len(ctm_info) > 0:
@@ -314,7 +319,12 @@ class SpeechModel(object):
         for phone, start_time, duration, conf in ctm_info:
             phone_duration_list.append(duration)
             phone_conf_list.append(conf)
-            phone_count_dict[phone] += 1  
+            phone_count_dict[phone] += 1
+            
+            #Detect vowel duration and count
+            if phone in self.vowel_dict:
+                vowel_duration_dict[phone].append(duration)
+                vowel_count_dict[phone] +=1
             
         # strat_time and duration of last phone
         # word in articlulation time
@@ -331,4 +341,46 @@ class SpeechModel(object):
         phone_stats_dict = merge_dict(phone_duration_stats, phone_conf_stats)
         phone_dict = merge_dict(phone_basic_dict, phone_stats_dict)
         
+        #Normalize vowel duration
+        vowel_duration_normalized_dict = {}
+        for vowel, durations in vowel_duration_dict.items():
+            total_vowel_duration = sum(durations)
+            vowel_duration_normalized_dict[vowel] = [d / total_vowel_duration for d in durations]
+        
+        #Check if the pronunciation is out of range #這邊的單位要再換一下
+        pronunciation_range = {
+            "AA": (267, 323),
+            "AE": (278, 332),
+            "AH": (188, 226),
+            "AO": (283, 353),
+            #"AW": (100, 200),
+            #"AY": (100, 200),
+            "EH": (189, 254),
+            "ER": (263, 321),
+            #"EY": (),
+            "IH": (192, 237),
+            "IY": (243, 306),
+            #"OW",
+            #"OY",
+            "UH": (192, 249),
+            "UW": (237, 303)
+        }
+        
+        out_of_range_vowels_normalized = []
+        out_of_range_count = 0
+        for vowel, durations in vowel_duration_normalized_dict.items():
+            for normalized_duration in durations:
+                min_duration, max_duration = pronunciation_range[vowel]
+                if normalized_duration < min_duration or normalized_duration > max_duration:
+                    out_of_range_vowels_normalized.append((vowel, normalized_duration))
+                    out_of_range_count += 1
+        
+        phone_dict.update({
+                "vowel_duration_dict": vowel_duration_dict,
+                #"vowel_count_dict": vowel_count_dict,
+                "vowel_duration_normalized_dict": vowel_duration_normalized_dict,
+                "out_of_range_vowels_normalized": out_of_range_vowels_normalized,
+                "out_of_range_count": out_of_range_count
+        })
+
         return phone_dict, response_duration
